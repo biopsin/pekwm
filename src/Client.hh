@@ -15,6 +15,7 @@
 #include "config.h"
 
 #include "pekwm.hh"
+#include "ClientHints.hh"
 #include "PWinObj.hh"
 #include "Observer.hh"
 #include "PTexturePlain.hh"
@@ -48,41 +49,13 @@ public:
     bool parent_is_new;
 };
 
-class Client : public PWinObj, public Observer
+class Client : public ClientHints, public PWinObj, public Observer
 {
     // FIXME: This relationship should end as soon as possible, but I need to
     // figure out a good way of sharing. :)
     friend class Frame;
 
 public: // Public Member Functions
-    struct MwmHints {
-        ulong flags;
-        ulong functions;
-        ulong decorations;
-    };
-    enum {
-        MWM_HINTS_FUNCTIONS = (1L << 0),
-        MWM_HINTS_DECORATIONS = (1L << 1),
-        MWM_HINTS_NUM = 3
-    };
-    enum {
-        MWM_FUNC_ALL = (1L << 0),
-        MWM_FUNC_RESIZE = (1L << 1),
-        MWM_FUNC_MOVE = (1L << 2),
-        MWM_FUNC_ICONIFY = (1L << 3),
-        MWM_FUNC_MAXIMIZE = (1L << 4),
-        MWM_FUNC_CLOSE = (1L << 5)
-    };
-    enum {
-        MWM_DECOR_ALL = (1L << 0),
-        MWM_DECOR_BORDER = (1L << 1),
-        MWM_DECOR_HANDLE = (1L << 2),
-        MWM_DECOR_TITLE = (1L << 3),
-        MWM_DECOR_MENU = (1L << 4),
-        MWM_DECOR_ICONIFY = (1L << 5),
-        MWM_DECOR_MAXIMIZE = (1L << 6)
-    };
-
     Client(Window new_client, ClientInitConfig &initConfig,
            bool is_new = false);
     virtual ~Client(void);
@@ -165,30 +138,15 @@ public: // Public Member Functions
 
     inline const ClassHint* getClassHint(void) const { return _class_hint; }
 
-    bool isTransient(void) const { return _transient_for_window != None; }
     Client *getTransientForClient(void) const { return _transient_for; }
-    Window getTransientForClientWindow(void) const {
-        return _transient_for_window;
-    }
     void findAndRaiseIfTransient(void);
 
     inline XSizeHints* getXSizeHints(void) const { return _size; }
 
     bool isViewable(void);
-    bool cameWithPosition(void) {
-        return _size->flags & (PPosition|USPosition);
-    }
-
-    bool hasTitlebar(void) const { return (_state.decor&DECOR_TITLEBAR); }
-    bool hasBorder(void) const { return (_state.decor&DECOR_BORDER); }
-    bool hasStrut(void) const { return (_strut); }
-    Strut *getStrut(void) const { return _strut; }
-    bool demandsAttention(void) const { return _demands_attention; }
 
     PTexture *getIcon(void) const { return _icon; }
 
-    /** Return PID of client. */
-    long getPid(void) const { return _pid; }
     /** Return true if client is remote. */
     bool isRemote(void) const { return _is_remote; }
 
@@ -264,8 +222,8 @@ public: // Public Member Functions
         }
     }
 
-    inline void setDemandsAttention(bool attention) {
-        _demands_attention = attention;
+    void setDemandsAttention(bool attention) {
+        _state.demands_attention = attention;
     }
 
     std::string getAPDecorName(void);
@@ -288,7 +246,6 @@ public: // Public Member Functions
     bool getAspectSize(uint *r_w, uint *r_h, uint w, uint h);
     bool getIncSize(uint *r_w, uint *r_h, uint w, uint h, bool incr=false);
 
-    bool getEwmhStates(NetWMStates &win_states);
     void updateEwmhStates(void);
 
     inline AtomName getWinType(void) const { return _window_type; }
@@ -296,18 +253,19 @@ public: // Public Member Functions
 
     ulong getWMHints(void);
     void getWMNormalHints(void);
-    void getWMProtocols(void);
     void getTransientForHint(void);
     void updateParentLayerAndRaiseIfActive(void);
-    void getStrutHint(void);
     void readName(void);
-    void removeStrutHint(void);
+    void setStrutHint(Strut* strut);
+    void removeStrutHint(Strut* strut);
 
     long getPekwmFrameOrder(void);
+
     void setPekwmFrameOrder(long num);
     bool getPekwmFrameActive(void);
     void setPekwmFrameActive(bool active);
 
+    void setFrameExtents(long left, long right, long top, long bottom);
     static void setClientEnvironment(Client *client);
     AutoProperty* readAutoprops(ApplyOn type = APPLY_ON_ALWAYS);
 
@@ -329,8 +287,6 @@ private:
     void setWmState(ulong state);
     long getWmState(void);
 
-    MwmHints* getMwmHints(Window w);
-
     // these are used by frame
     inline void setMaximizedVert(bool m) { _state.maximized_vert = m; }
     inline void setMaximizedHorz(bool m) { _state.maximized_horz = m; }
@@ -340,16 +296,10 @@ private:
     // Grabs button with Caps,Num and so on
     void grabButton(int button, int mod, int mask, Window win);
 
-    void readHints(void);
     void readClassRoleHints(void);
-    void readEwmhHints(void);
-    void readMwmHints(void);
-    void readPekwmHints(void);
     void readIcon(void);
     void applyAutoprops(AutoProperty *ap);
     void applyActionAccessMask(uint mask, bool value);
-    void readClientPid(void);
-    void readClientRemote(void);
 
     static uint findClientID(void);
     static void returnClientID(uint id);
@@ -357,78 +307,23 @@ private:
 private: // Private Member Variables
     uint _id; //<! Unique ID of the Client.
 
-    XSizeHints *_size;
     Colormap _cmap;
 
     /** Client for which this client is transient for */
     Client *_transient_for;
-    Window _transient_for_window;
     std::vector<Client*> _transients; /**< Vector of transient clients. */
-
-    Strut *_strut;
 
     PDecor::TitleItem _title; /**< Name of the client. */
     PTextureImage *_icon;
-
-    /** _NET_WM_PID of the client, only valid if is_remote is false. */
-    long _pid;
-    bool _is_remote;
+    bool _is_remote; /**< Boolean flag  */
 
     ClassHint *_class_hint;
     AtomName _window_type; /**< _NET_WM_WINDOW_TYPE */
 
     bool _alive, _marked;
-    bool _send_focus_message, _send_close_message, _wm_hints_input;
+    bool _wm_hints_input;
     bool _cfg_request_lock;
     bool _extended_net_name;
-    /** If true, the client requires attention from the user. */
-    bool _demands_attention;
-
-    class State {
-    public:
-        State(void)
-            : maximized_vert(false),
-              maximized_horz(false),
-              shaded(false),
-              fullscreen(false),
-              placed(false),
-              initial_frame_order(0),
-              skip(0),
-              decor(DECOR_TITLEBAR|DECOR_BORDER),
-              cfg_deny(CFG_DENY_NO)
-        {
-        }
-        ~State(void) { }
-
-        bool maximized_vert, maximized_horz;
-        bool shaded;
-        bool fullscreen;
-
-        // pekwm states
-        bool placed;
-        uint initial_frame_order; /**< Initial frame position */
-        uint skip, decor, cfg_deny;
-    } _state;
-
-    class Actions {
-    public:
-        Actions(void) : move(true), resize(true), iconify(true),
-                shade(true), stick(true), maximize_horz(true),
-                maximize_vert(true), fullscreen(true),
-                change_ws(true), close(true) { }
-        ~Actions(void) { }
-
-        bool move:1;
-        bool resize:1;
-        bool iconify:1; // iconify
-        bool shade:1;
-        bool stick:1;
-        bool maximize_horz:1;
-        bool maximize_vert:1;
-        bool fullscreen:1;
-        bool change_ws:1; // workspace
-        bool close:1;
-    } _actions;
 
     static const long _clientEventMask;
 

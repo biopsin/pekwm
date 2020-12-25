@@ -63,6 +63,17 @@ public:
     Strut(long l=0, long r=0, long t=0, long b=0, int nhead=-1)
         : left(l), right(r), top(t), bottom(b), head(nhead) { };
     ~Strut(void) { };
+
+    bool isSet() const {
+        return left != 0 || right != 0 || top != 0 || bottom != 0;
+    }
+    void clear() {
+        left = 0;
+        right = 0;
+        top = 0;
+        bottom = 0;
+    }
+
 public: // member variables
     long left; /**< Pixels allocated on the left of the head. */
     long right; /**<Pixels allocated on the right of the head. */

@@ -163,6 +163,8 @@ protected:
     Frame(void);
 
     // BEGIN - PDecor interface
+    virtual void decorUpdated(void) override;
+
     virtual int resizeHorzStep(int diff) const override;
     virtual int resizeVertStep(int diff) const override;
 
@@ -197,6 +199,9 @@ private:
 
     void workspacesInsert();
     void workspacesRemove();
+
+    void setActiveTitle(void);
+    void setClientFrameExtents(Client *client);
 
     static uint findFrameID(void);
     static void returnFrameID(uint id);

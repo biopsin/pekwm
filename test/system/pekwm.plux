@@ -145,6 +145,19 @@ in one go.
     ?SH-PROMPT:
 [endfunction]
 
+[function test_net_request_frame_extents]
+    [shell test_net_request_frame_extents]
+        -ERROR
+        [log test_net_request_frame_extents]
+        !env DISPLAY=:1 $TEST_DIR/test_net_request_frame_extents
+        ?PROGRESS: send _NET_REQUEST_FRAME_EXTENTS
+        ?PROGRESS: wait for PropertyNotify
+        ?PROGRESS: read _NET_FRAME_EXTENTS
+        ?PROGRESS: type_ret 6 format_ret 32 items_ret 4 after_ret 0
+        ?OK: extents left [1-9][0-9]* right [1-9][0-9]* top [1-9][0-9]* bottom [1-9][0-9]*
+        ?SH-PROMPT:
+[endfunction]
+
 [shell Xvfb]
     ?SH-PROMPT:
     [log starting Xvfb]
@@ -159,6 +172,7 @@ in one go.
 
 [shell test]
     [call test_warp_pointer]
+    [call test_net_request_frame_extents]
     [call test_update_client_list_report_all]
 
 [shell pekwm]

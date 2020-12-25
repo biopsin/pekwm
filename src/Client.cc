@@ -47,16 +47,19 @@ std::vector<Client*> Client::_clients;
 std::vector<uint> Client::_clientids;
 
 Client::Client(Window new_client, ClientInitConfig &initConfig, bool is_new)
-    : PWinObj(true),
-      _id(0), _size(0),
-      _transient_for(0), _strut(0), _icon(0),
-      _pid(0), _is_remote(false), _class_hint(0),
+    : ClientHints(),
+      PWinObj(true),
+      _id(0),
+      _transient_for(nullptr),
+      _icon(0),
+      _is_remote(false),
+      _class_hint(0),
       _window_type(WINDOW_TYPE_NORMAL),
-      _alive(false), _marked(false),
-      _send_focus_message(false), _send_close_message(false),
-      _wm_hints_input(true), _cfg_request_lock(false),
-      _extended_net_name(false),
-      _demands_attention(false)
+      _alive(false),
+      _marked(false),
+      _wm_hints_input(true),
+      _cfg_request_lock(false),
+      _extended_net_name(false)
 {
     // PWinObj attributes, required by validate etc.
     _window = new_client;
@@ -119,8 +122,31 @@ Client::Client(Window new_client, ClientInitConfig &initConfig, bool is_new)
     // avoid auto-grouping to be to greedy.
     getTransientForHint();
 
-    auto ap = readAutoprops(pekwm::isStartup() ? APPLY_ON_NEW : APPLY_ON_START);
-    readHints();
+    auto ap = readAutoprops(pekwm::isStartup()
+                            ? APPLY_ON_NEW : APPLY_ON_START);
+
+    readHints(_window);
+    readIcon();
+
+    // FIXME: read autoproperties
+    // FIXME: filter out state with cfgDeny
+    setTitlebar(_state.decor & DECOR_TITLEBAR);
+    setBorder(_state.decor & DECOR_BORDER);
+    // updateWinType();
+    // X11::setLong(win, NET_WM_DESKTOP, _workspace);
+    // FIXME: actions previously done while reading hints here
+    // setLayer
+    // _title.setuser
+
+    // Apply autoproperties for window type
+    //auto auto_property =
+    //    AutoProperties::instance()->findWindowTypeProperty(_window_type);
+    //if (auto_property) {
+    //    applyAutoprops(auto_property);
+    //}
+    setStrutHint(getStrut());
+
+    _is_remote = Util::getHostname() != _client_machine;
 
     // We need to set the state before acquiring a frame,
     // so that Frame's state can match the state of the Client.
@@ -195,7 +221,7 @@ Client::~Client(void)
         X11::free(_size);
     }
 
-    removeStrutHint();
+    removeStrutHint(getStrut());
 
     if (_class_hint) {
         delete _class_hint;
@@ -839,20 +865,6 @@ Client::setStateCfgDeny(StateAction sa, uint deny)
     }
 }
 
-/**
- * Read "all" hints required during creation of Client.
- */
-void
-Client::readHints(void)
-{
-    readMwmHints();
-    readEwmhHints();
-    readPekwmHints();
-    readIcon();
-    readClientPid();
-    readClientRemote();
-    getWMProtocols();
-}
 
 /**
  * Read the WM_CLASS hint and set information on the _class_hint used
@@ -877,133 +889,21 @@ Client::readClassRoleHints(void)
     _class_hint->h_role = Util::to_wide_str(role);
 }
 
-//! @brief Loads the Clients state from EWMH atoms.
-void
-Client::readEwmhHints(void)
-{
-    // which workspace do we belong to?
-    long workspace = -1;
-    X11::getLong(_window, NET_WM_DESKTOP, workspace);
-    if (workspace < 0) {
-        _workspace = Workspaces::getActive();
-        X11::setLong(_window, NET_WM_DESKTOP, _workspace);
-    } else {
-        _workspace = workspace;
-    }
-
-    updateWinType(true);
-
-    // Apply autoproperties for window type
-    auto auto_property =
-        pekwm::autoProperties()->findWindowTypeProperty(_window_type);
-    if (auto_property) {
-        applyAutoprops(auto_property);
-    }
-
-    // The _NET_WM_STATE overrides the _NET_WM_TYPE
-    NetWMStates win_states;
-    if (getEwmhStates(win_states)) {
-        if (win_states.hidden) _iconified = true;
-        if (win_states.shaded) _state.shaded = true;
-        if (win_states.max_vert) _state.maximized_vert = true;
-        if (win_states.max_horz) _state.maximized_horz = true;
-        if (win_states.skip_taskbar) _state.skip |= SKIP_TASKBAR;
-        if (win_states.skip_pager) _state.skip |= SKIP_PAGER;
-        if (win_states.sticky) _sticky = true;
-        if (win_states.above) {
-            setLayer(LAYER_ABOVE_DOCK);
-        }
-        if (win_states.below) {
-            setLayer(LAYER_BELOW);
-        }
-        if (win_states.fullscreen) _state.fullscreen = true;
-        _demands_attention = win_states.demands_attention;
-    }
-
-    // check if we have a strut
-    getStrutHint();
-}
-
-//! @brief Loads the Clients state from MWM atoms.
-void
-Client::readMwmHints(void)
-{
-    MwmHints *mwm_hints = getMwmHints(_window);
-
-    if (mwm_hints) {
-        if (mwm_hints->flags&MWM_HINTS_FUNCTIONS) {
-            bool state = ! (mwm_hints->functions&MWM_FUNC_ALL);
-
-            _actions.resize   = (mwm_hints->functions&MWM_FUNC_RESIZE)  ? state : ! state;
-            _actions.move     = (mwm_hints->functions&MWM_FUNC_MOVE)    ? state : ! state;
-            _actions.iconify  = (mwm_hints->functions&MWM_FUNC_ICONIFY) ? state : ! state;
-            _actions.close    = (mwm_hints->functions&MWM_FUNC_CLOSE)   ? state : ! state;
-            _actions.maximize_vert = (mwm_hints->functions&MWM_FUNC_MAXIMIZE) ? state : ! state;
-            _actions.maximize_horz = (mwm_hints->functions&MWM_FUNC_MAXIMIZE) ? state : ! state;
-        }
-
-        // Check decoration flags
-        if (mwm_hints->flags & MWM_HINTS_DECORATIONS) {
-            if (mwm_hints->decorations & MWM_DECOR_ALL) {
-                setTitlebar(true);
-                setBorder(true);
-            } else {
-                if (! (mwm_hints->decorations & MWM_DECOR_TITLE)) {
-                    setTitlebar(false);
-                }
-                if (! (mwm_hints->decorations & MWM_DECOR_BORDER)) {
-                    setBorder(false);
-                }
-                // Do not handle HANDLE, MENU, ICONFIY or MAXIMIZE. Maybe
-                // one should set the allowed actions for the client based
-                // on this but that might be annoying so ignoring these.
-            }
-        }
-        X11::free(mwm_hints);
-    }
-}
-
-//! @brief Reads non-standard pekwm hints
-void
-Client::readPekwmHints(void)
-{
-    long value;
-    std::string str;
-
-    // Get decor state
-    if (X11::getLong(_window, PEKWM_FRAME_DECOR, value)) {
-        _state.decor = value;
-    }
-    // Get skip state
-    if (X11::getLong(_window, PEKWM_FRAME_SKIP, value)) {
-        _state.skip = value;
-    }
-
-    // Get custom title
-    if (X11::getString(_window, PEKWM_TITLE, str)) {
-        _title.setUser(Util::to_wide_str(str));
-    }
-
-    _state.initial_frame_order = getPekwmFrameOrder();
-}
-
-//! @brief Read _NET_WM_ICON from client window.
+/**
+ * Read _NET_WM_ICON from client window.
+ */
 void
 Client::readIcon(void)
 {
-    PImageIcon *image = new PImageIcon;
+    auto image = new PImageIcon();
     if (image->loadFromWindow(_window)) {
         if (! _icon) {
             _icon = new PTextureImage;
             pekwm::textureHandler()->referenceTexture(_icon);
         }
-
         _icon->setImage(image);
     } else {
-        if (image) {
-            delete image;
-        }
-
+        delete image;
         if (_icon) {
             pekwm::textureHandler()->returnTexture(_icon);
             _icon = 0;
@@ -1120,34 +1020,12 @@ Client::applyActionAccessMask(uint mask, bool value)
     }
 }
 
-/**
- * Read _NET_WM_PID.
- */
-void
-Client::readClientPid(void)
-{
-    X11::getLong(_window, NET_WM_PID, _pid);
-}
-
-/**
- * Read WM_CLIENT_MACHINE and check against local hostname and set
- * _is_remote if it does not match.
- */
-void
-Client::readClientRemote(void)
-{
-    std::string client_machine;
-    if (X11::getTextProperty(_window, XA_WM_CLIENT_MACHINE, client_machine)) {
-        _is_remote = Util::getHostname() != client_machine;
-    }
-}
-
 //! @brief Finds free Client ID.
 //! @return First free Client ID.
 uint
 Client::findClientID(void)
 {
-    uint id = 0;    
+    uint id = 0;
 
     if (_clientids.size()) {
         // Check for used Frame IDs
@@ -1555,36 +1433,6 @@ Client::getIncSize(uint *r_w, uint *r_h, uint w, uint h, bool incr)
     return false;
 }
 
-//! @brief Gets a MwmHint structure from a window. Doesn't free memory.
-Client::MwmHints*
-Client::getMwmHints(Window win)
-{
-    Atom real_type; int real_format;
-    ulong items_read, items_left;
-    MwmHints *data = 0;
-    uchar *udata;
-
-    Atom hints_atom = X11::getAtom(MOTIF_WM_HINTS);
-
-    int status = XGetWindowProperty(X11::getDpy(), win, hints_atom, 0L, 20L, False, hints_atom,
-                                    &real_type, &real_format, &items_read, &items_left, &udata);
-
-    if (status == Success) {
-        if (items_read < MWM_HINTS_NUM) {
-            X11::free(udata);
-            udata = 0;
-        }
-    } else {
-        udata = 0;
-    }
-
-    if (udata) {
-        data = reinterpret_cast<MwmHints*>(udata);
-    }
-
-    return data;
-}
-
 // This happens when a window is iconified and destroys itself. An
 // Unmap event wouldn't happen in that case because the window is
 // already unmapped.
@@ -1601,56 +1449,6 @@ Client::handleColormapChange(XColormapEvent *e)
     if (e->c_new) {
         _cmap = e->colormap;
         XInstallColormap(X11::getDpy(), _cmap);
-    }
-}
-
-bool
-Client::getEwmhStates(NetWMStates &win_states)
-{
-    int num = 0;
-    Atom *states;
-    states = (Atom*) X11::getEwmhPropData(_window, STATE, XA_ATOM, num);
-
-    if (states) {
-        for (int i = 0; i < num; ++i) {
-            if (states[i] == X11::getAtom(STATE_MODAL)) {
-                win_states.modal = true;
-            } else if (states[i] == X11::getAtom(STATE_STICKY)) {
-                win_states.sticky = true;
-            } else if (states[i] == X11::getAtom(STATE_MAXIMIZED_VERT)
-                       && ! isCfgDeny(CFG_DENY_STATE_MAXIMIZED_VERT)) {
-                win_states.max_vert = true;
-            } else if (states[i] == X11::getAtom(STATE_MAXIMIZED_HORZ)
-                       && ! isCfgDeny(CFG_DENY_STATE_MAXIMIZED_HORZ)) {
-                win_states.max_horz = true;
-            } else if (states[i] == X11::getAtom(STATE_SHADED)) {
-                win_states.shaded = true;
-            } else if (states[i] == X11::getAtom(STATE_SKIP_TASKBAR)) {
-                win_states.skip_taskbar = true;
-            } else if (states[i] == X11::getAtom(STATE_SKIP_PAGER)) {
-                win_states.skip_pager = true;
-            } else if (states[i] == X11::getAtom(STATE_DEMANDS_ATTENTION)) {
-                win_states.demands_attention = true;
-            } else if (states[i] == X11::getAtom(STATE_HIDDEN)
-                       && ! isCfgDeny(CFG_DENY_STATE_HIDDEN)) {
-                win_states.hidden = true;
-            } else if (states[i] == X11::getAtom(STATE_FULLSCREEN)
-                       && ! isCfgDeny(CFG_DENY_STATE_FULLSCREEN)) {
-                win_states.fullscreen = true;
-            } else if (states[i] == X11::getAtom(STATE_ABOVE)
-                       && ! isCfgDeny(CFG_DENY_STATE_ABOVE)) {
-                win_states.above = true;
-            } else if (states[i] == X11::getAtom(STATE_BELOW)
-                       && ! isCfgDeny(CFG_DENY_STATE_BELOW)) {
-                win_states.below = true;
-            }
-        }
-
-        X11::free(states);
-
-        return true;
-    } else {
-        return false;
     }
 }
 
@@ -1798,24 +1596,10 @@ Client::getWMNormalHints(void)
             _size->flags &= ~PMaxSize;
         }
     }
-}
 
-void
-Client::getWMProtocols(void)
-{
-    int count;
-    Atom *protocols;
-
-    if (XGetWMProtocols(X11::getDpy(), _window, &protocols, &count) != 0) {
-        for (int i = 0; i < count; ++i) {
-            if (protocols[i] == X11::getAtom(WM_TAKE_FOCUS)) {
-                _send_focus_message = true;
-            } else if (protocols[i] == X11::getAtom(WM_DELETE_WINDOW)) {
-                _send_close_message = true;
-            }
-        }
-
-        X11::free(protocols);
+    if (_size->flags & (PPosition|USPosition)) {
+        _gm.x = _size->x;
+        _gm.y = _size->y;
     }
 }
 
@@ -1858,53 +1642,34 @@ Client::updateParentLayerAndRaiseIfActive(void)
 }
 
 /**
-   Read the NET_WM_STRUT hint from the client window if any, adding it to
-   the global list of struts if the client does not have Strut in it's CfgDeny.
+ * Add strut to the global list of struts if the client does not have
+ * Strut in it's CfgDeny.
 */
 void
-Client::getStrutHint(void)
+Client::setStrutHint(Strut *strut)
 {
-    // Clear out old strut, well re-add if a new one is found.
-    removeStrutHint();
+    removeStrutHint(strut);
 
-    int num = 0;
-    long *strut = static_cast<long*>(X11::getEwmhPropData(_window, NET_WM_STRUT,
-                                                          XA_CARDINAL, num));
-    if (strut) {
-        _strut = new Strut();
-        *_strut = strut;
-        X11::free(strut);
+    if (strut->isSet()) {
         if (! isCfgDeny(CFG_DENY_STRUT)) {
-            pekwm::rootWo()->addStrut(_strut);
+            pekwm::rootWo()->addStrut(strut);
         }
     }
 }
 
 /**
-   Free resources used by the clients strut hint if any and unregister it from
-   the screen if Strut is not in it's CfgDeny.
-*/
-void
-Client::removeStrutHint(void)
-{
-    if ( _strut) {
-        if (! isCfgDeny(CFG_DENY_STRUT)) {
-            pekwm::rootWo()->removeStrut(_strut);
-        }
-        delete _strut;
-        _strut = 0;
-    }
-}
-
-/**
- * Get _PEKWM_FRAME_ORDER hint from client, return < 0 on failure.
+ * Free resources used by the clients strut hint if any and unregister
+ * it from the screen if Strut is not in it's CfgDeny.
  */
-long
-Client::getPekwmFrameOrder(void)
+void
+Client::removeStrutHint(Strut *strut)
 {
-    long num = -1;
-    X11::getLong(_window, PEKWM_FRAME_ORDER, num);
-    return num;
+    if (strut->isSet()) {
+        if (! isCfgDeny(CFG_DENY_STRUT)) {
+            pekwm::rootWo()->removeStrut(&_strut);
+        }
+        strut->clear();
+    }
 }
 
 /**
@@ -1935,6 +1700,16 @@ void
 Client::setPekwmFrameActive(bool act)
 {
     X11::setLong(_window, PEKWM_FRAME_ACTIVE, act ? 1 : 0);
+}
+
+/**
+ * Set _NET_FRAME_EXTENTS on client.
+ */
+void
+Client::setFrameExtents(long left, long right, long top, long bottom)
+{
+    long extents[] = {left, right, top, bottom};
+    X11::setLongs(_window, NET_FRAME_EXTENTS, extents, 4);
 }
 
 /**

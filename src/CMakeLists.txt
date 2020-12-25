@@ -37,6 +37,7 @@ set(wm_SOURCES
   Completer.cc
   Client.cc
   ClientMgr.cc
+  ClientHints.cc
   CmdDialog.cc
   Config.cc
   DockApp.cc

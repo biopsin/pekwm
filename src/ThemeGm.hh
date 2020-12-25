@@ -37,7 +37,7 @@ public:
         return bdLeft(state) + bdRight(state);
     }
     uint decorHeight(const ThemeState *state) const {
-        return bdTop(state) + bdBottom(state) + titleHeight(state);
+       return bdTop(state) + bdBottom(state) + titleHeight(state);
     }
 
     /** Returns font used at FocusedState state. */

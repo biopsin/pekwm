@@ -1242,12 +1242,63 @@ WindowManager::handleClientMessageEvent(XClientMessageEvent *ev)
                 }
             }
         }
+    } else if (ev->message_type == X11::getAtom(NET_REQUEST_FRAME_EXTENTS)) {
+        handleNetRequestFrameExtents(ev->window);
     } else {
         auto client = Client::findClientFromWindow(ev->window);
         if (client) {
             auto *frame = static_cast<Frame*>(client->getParent());
             frame->handleClientMessage(ev, client);
         }
+    }
+}
+
+void
+WindowManager::handleNetRequestFrameExtents(Window win)
+{
+    ClientHints *hints;
+    auto client = Client::findClientFromWindow(win);
+    if (client == nullptr) {
+        hints = new ClientHints();
+        hints->readHints(win);
+    } else {
+        hints = static_cast<ClientHints*>(client);
+    }
+
+    // FIXME: clean-up to share code with PDecor and Client,
+    // take client state into consideration such as window type.
+
+    // _NET_REQUEST_FRAME_EXTENTS is requested before the Client
+    // is mapped to allow for the client to place itself taking
+    // the decorations into consideration.
+    auto data = pekwm::theme()->getPDecorData("DEFAULT");
+    if (data) {
+        long extents[] = {0, 0, 0, 0};
+        if (hints->hasBorder()) {
+            extents[0] += data->getBorderTexture(FOCUSED_STATE_FOCUSED,
+                                                 BORDER_LEFT)->getWidth();
+            extents[1] += data->getBorderTexture(FOCUSED_STATE_FOCUSED,
+                                                 BORDER_RIGHT)->getWidth();
+            extents[2] += data->getBorderTexture(FOCUSED_STATE_FOCUSED,
+                                                 BORDER_TOP)->getHeight();
+            extents[3] += data->getBorderTexture(FOCUSED_STATE_FOCUSED,
+                                                 BORDER_BOTTOM)->getHeight();
+        }
+
+        if (hints->hasTitlebar()) {
+            if (data->isTitleHeightAdapt()) {
+                extents[2] += data->getFont(FOCUSED_STATE_FOCUSED)->getHeight()
+                    + data->getPad(PAD_UP) + data->getPad(PAD_DOWN);
+            } else {
+                extents[2] += data->getTitleHeight();
+            }
+        }
+
+        X11::setLongs(win, NET_FRAME_EXTENTS, extents, 4);
+    }
+
+    if (client == nullptr) {
+        delete hints;
     }
 }
 
@@ -1267,16 +1318,10 @@ void
 WindowManager::handlePropertyEvent(XPropertyEvent *ev)
 {
     if (ev->window == X11::getRoot()) {
-        if (ev->atom == X11::getAtom(NET_DESKTOP_NAMES)) {
-            pekwm::rootWo()->readEwmhDesktopNames();
-            Workspaces::setNames();
-        }
-
-        return;
+        return pekwm::rootWo()->handlePropertyChange(ev);
     }
 
     Client *client = Client::findClientFromWindow(ev->window);
-
     if (client) {
         ((Frame*) client->getParent())->handlePropertyChange(ev, client);
     }

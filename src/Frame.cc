@@ -437,8 +437,11 @@ Frame::addChild(PWinObj *child, std::vector<PWinObj*>::iterator *it)
     child->lower();
 
     Client *client = dynamic_cast<Client*>(child);
-    if (client && client->demandsAttention()) {
-        incrAttention();
+    if (client) {
+        if (client->demandsAttention()) {
+            incrAttention();
+        }
+        setClientFrameExtents(client);
     }
 }
 
@@ -584,6 +587,17 @@ Frame::setShaded(StateAction sa)
     if (shaded != isShaded()) {
         _client->setShade(isShaded());
         _client->updateEwmhStates();
+    }
+}
+
+void
+Frame::decorUpdated(void)
+{
+    // Decoration updated, set _NET_FRAME_EXTENTS to match the current
+    // theme, border and titlebar state.
+    std::vector<PWinObj*>::const_iterator it(begin());
+    for (; it != end(); ++it) {
+        setClientFrameExtents(dynamic_cast<Client*>(*it));
     }
 }
 
@@ -884,6 +898,21 @@ Frame::applyGeometry(Geometry &gm, const Geometry &ap_gm, int mask,
         } else {
             gm.y = screen_gm.y + ap_gm.y;
         }
+    }
+}
+
+/**
+ * Set _NET_WM_FRAME_EXTENTS on Client accoarding to current border
+ * and titlebar size and state.
+ */
+void
+Frame::setClientFrameExtents(Client *client)
+{
+    if (client) {
+        client->setFrameExtents(bdLeft(this),
+                                bdRight(this),
+                                bdTop(this) + titleHeight(this),
+                                bdBottom(this));
     }
 }
 
@@ -2370,11 +2399,12 @@ Frame::handlePropertyChange(XPropertyEvent *ev, Client *client)
             }
         }
     } else if (ev->atom == X11::getAtom(NET_WM_STRUT)) {
-        client->getStrutHint();
-    } else if (ev->atom == X11::getAtom(NET_WM_NAME) || ev->atom == XA_WM_NAME) {
+        client->readEwmhStrut(client->getWindow());
+    } else if (ev->atom == X11::getAtom(NET_WM_NAME)
+               || ev->atom == XA_WM_NAME) {
         handleTitleChange(client);
     } else if (ev->atom == X11::getAtom(MOTIF_WM_HINTS)) {
-        client->readMwmHints();
+        client->readMwm(client->getWindow());
         if (! isFullscreen() && _client == client) {
             setBorder(_client->hasBorder()?STATE_SET:STATE_UNSET);
             setTitlebar(_client->hasTitlebar()?STATE_SET:STATE_UNSET);
@@ -2395,7 +2425,7 @@ Frame::handlePropertyChange(XPropertyEvent *ev, Client *client)
             }
         }
     } else if (ev->atom == X11::getAtom(WM_PROTOCOLS)) {
-      client->getWMProtocols();
+        client->getWMProtocols(client->getWindow());
     }
 }
 
