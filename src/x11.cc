@@ -156,6 +156,11 @@ static const char *atomnames[] = {
 
     "_XROOTPMAP_ID",
     "_XSETROOT_ID",
+
+#ifdef HAVE_XINPUT
+    XI_MOUSE,
+    XI_KEYBOARD
+#endif // HAVE_XINPUT
 };
 
 /**
@@ -260,9 +265,22 @@ X11::init(Display *dpy, bool synchronous, bool honour_randr)
     }
 #endif // HAVE_X11_XKBLIB_H
 
+#ifdef HAVE_XINPUT
+    {
+        auto ver = XGetExtensionVersion(_dpy, INAME);
+        if (ver == nullptr) {
+            _has_extension_xinput = false;
+        } else {
+            _has_extension_xinput = ver->present;
+            XFree(ver);
+        }
+    }
+#endif // HAVE_XINPUT
+
     // Now screen geometry has been read and extensions have been
     // looked for, read head information.
     initHeads();
+    initXInput();
 
     // initialize array values
     for (uint i = 0; i < (BUTTON_NO - 1); ++i) {
@@ -287,6 +305,8 @@ X11::init(Display *dpy, bool synchronous, bool honour_randr)
 //! @brief X11 destructor
 void
 X11::destruct(void) {
+    destructXInput();
+
     if (_colours.size() > 0) {
         ulong *pixels = new ulong[_colours.size()];
         for (uint i=0; i < _colours.size(); ++i) {
@@ -445,7 +465,9 @@ X11::ungrabServer(bool sync)
     return _server_grabs == 0;
 }
 
-//! @brief Grabs the keyboard
+/**
+ * Grabs the keyboard
+ */
 bool
 X11::grabKeyboard(Window win)
 {
@@ -472,10 +494,13 @@ bool
 X11::grabPointer(Window win, uint event_mask, CursorType type)
 {
     TRACE("grabbing pointer");
-    auto cursor = type < _cursor_map.size() ? _cursor_map[type] : None;
-    if (XGrabPointer(_dpy, win, false, event_mask, GrabModeAsync, GrabModeAsync,
-                     None, cursor, CurrentTime) == GrabSuccess) {
-        return true;
+    if (_dpy) {
+        auto cursor = type < _cursor_map.size() ? _cursor_map[type] : None;
+        if (XGrabPointer(_dpy, win, false, event_mask,
+                         GrabModeAsync, GrabModeAsync,
+                         None, cursor, CurrentTime) == GrabSuccess) {
+            return true;
+        }
     }
     ERR("failed to grab pointer on " << win
         << ", event_mask " << event_mask
@@ -488,8 +513,25 @@ bool
 X11::ungrabPointer(void)
 {
     TRACE("ungrabbing pointer");
-    XUngrabPointer(_dpy, CurrentTime);
+    if (_dpy) {
+        XUngrabPointer(_dpy, CurrentTime);
+        return true;
+    }
     return false;
+}
+
+void
+X11::allowPointerEvents(Time time)
+{
+    if (_dpy) {
+#ifdef HAVE_XINPUT
+        if (_has_extension_xinput && _xinput_mouse_device) {
+            XAllowDeviceEvents(_dpy, _xinput_mouse_device, ReplayThisDevice,
+                               time);
+        }
+#endif // HAVE_XINPUT
+        XAllowEvents(_dpy, ReplayPointer, time);
+    }
 }
 
 //! @brief Refetches the root-window size.
@@ -1008,6 +1050,39 @@ X11::parseGeometryVal(const char *cstr, const char *e_end, int &val)
     return end == e_end ? 1 : 0;
 }
 
+void
+X11::initXInput(void)
+{
+#ifdef HAVE_XINPUT
+    int ndevices;
+    auto devs = XListInputDevices(_dpy, &ndevices);
+    for (int i = 0; i < ndevices; i++) {
+        if (devs[i].type == _atoms[MOUSE]
+            && _xinput_mouse_device == nullptr)  {
+            _xinput_mouse_device = XOpenDevice(_dpy, devs[i].id);
+        } else if (devs[i].type == _atoms[KEYBOARD]
+                   && _xinput_keyboard_device) {
+            _xinput_keyboard_device = XOpenDevice(_dpy, devs[i].id);
+        }
+    }
+#endif // HAVE_XINPUT
+}
+
+void
+X11::destructXInput(void)
+{
+#ifdef HAVE_XINPUT
+    if (_xinput_mouse_device) {
+        XCloseDevice(_dpy, _xinput_mouse_device);
+        _xinput_mouse_device = nullptr;
+    }
+    if (_xinput_keyboard_device) {
+        XCloseDevice(_dpy, _xinput_keyboard_device);
+        _xinput_keyboard_device = nullptr;
+    }
+#endif // HAVE_XINPUT
+}
+
 Display *X11::_dpy;
 bool X11::_honour_randr = false;
 int X11::_fd = -1;
@@ -1023,6 +1098,7 @@ int X11::_event_shape = -1;
 bool X11::_has_extension_xkb = false;
 bool X11::_has_extension_xinerama = false;
 bool X11::_has_extension_xrandr = false;
+bool X11::_has_extension_xinput = false;
 int X11::_event_xrandr = -1;
 uint X11::_num_lock;
 uint X11::_scroll_lock;
@@ -1034,3 +1110,8 @@ Time X11::_last_click_time[BUTTON_NO - 1];
 std::vector<X11::ColorEntry*> X11::_colours;
 XColor X11::_xc_default;
 std::array<Cursor, CURSOR_NONE> X11::_cursor_map;
+
+#ifdef HAVE_XINPUT
+XDevice* X11::_xinput_mouse_device = nullptr;
+XDevice* X11::_xinput_keyboard_device = nullptr;
+#endif // HAVE_XINPUT

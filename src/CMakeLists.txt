@@ -101,6 +101,11 @@ if (ENABLE_RANDR AND X11_Xrandr_FOUND)
   set(common_LIBRARIES ${common_LIBRARIES} ${X11_Xrandr_LIB})
 endif (ENABLE_RANDR AND X11_Xrandr_FOUND)
 
+if (ENABLE_XINPUT AND X11_Xinput_FOUND)
+  set(common_INCLUDE_DIRS ${common_INCLUDE_DIRS} ${X11_Xinput_INCLUDE_PATH})
+  set(common_LIBRARIES ${common_LIBRARIES} ${X11_Xinput_LIB})
+endif (ENABLE_XINPUT AND X11_Xinput_FOUND)
+
 add_library(util STATIC ${util_SOURCES})
 target_include_directories(util PUBLIC ${common_INCLUDE_DIRS})
 

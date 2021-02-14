@@ -53,7 +53,7 @@ public:
         _skip_enter = 0;
     }
 
-    void setEventHandler(EventHandler *event_handler) {
+    void setEventHandler(EventHandler *event_handler) override {
         if (_event_handler) {
             delete _event_handler;
         }

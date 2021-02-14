@@ -24,7 +24,7 @@ extern "C" {
 #endif // HAVE_XINERAMA
 #ifdef HAVE_SHAPE
 #include <X11/extensions/shape.h>
-#else // ! HAVE_SHAPE
+#else // HAVE_SHAPE
 #define ShapeSet 0
 #define ShapeIntersect 2
 
@@ -33,6 +33,9 @@ extern "C" {
 
 #define ShapeNotifyMask 1
 #endif // HAVE_SHAPE
+#ifdef HAVE_XINPUT
+#include <X11/extensions/XInput.h>
+#endif // HAVE_XINPUT
 
 extern bool xerrors_ignore; /**< If true, ignore X errors. */
 extern unsigned int xerrors_count; /**< Number of X errors occured. */
@@ -194,16 +197,18 @@ public:
     }
 
     static void setLockKeys(void);
-    inline static uint getNumLock(void) { return _num_lock; }
-    inline static uint getScrollLock(void) { return _scroll_lock; }
+    static uint getNumLock(void) { return _num_lock; }
+    static uint getScrollLock(void) { return _scroll_lock; }
 
-    inline static bool hasExtensionShape(void) { return _has_extension_shape; }
-    inline static int getEventShape(void) { return _event_shape; }
+    static bool hasExtensionShape(void) { return _has_extension_shape; }
+    static int getEventShape(void) { return _event_shape; }
 
     static bool updateGeometry(uint width, uint height);
 
     static bool hasExtensionXRandr(void) { return _has_extension_xrandr; }
     static int getEventXRandr(void) { return _event_xrandr; }
+
+    static bool hasExtensionXInput(void) { return _has_extension_xinput; }
 
     static Cursor getCursor(CursorType type) { return _cursor_map[type]; }
 
@@ -214,6 +219,8 @@ public:
     static bool ungrabKeyboard(void);
     static bool grabPointer(Window win, uint event_mask, CursorType cursor);
     static bool ungrabPointer(void);
+
+    static void allowPointerEvents(Time time);
 
     static uint getNearestHead(int x, int y);
     static uint getCursorHead(void);
@@ -633,6 +640,8 @@ private:
     static void initHeads(void);
     static void initHeadsRandr(void);
     static void initHeadsXinerama(void);
+    static void initXInput(void);
+    static void destructXInput(void);
 
 protected:
     X11(void) {}
@@ -657,13 +666,11 @@ private:
 
     static bool _has_extension_shape;
     static int _event_shape;
-
     static bool _has_extension_xkb;
-
     static bool _has_extension_xinerama;
-
     static bool _has_extension_xrandr;
     static int _event_xrandr;
+    static bool _has_extension_xinput;
 
     static std::vector<Head> _heads; //! Array of head information
     static uint _last_head; //! Last accessed head
@@ -682,4 +689,9 @@ private:
     static XColor _xc_default; // when allocating fails
 
     static Atom _atoms[MAX_NR_ATOMS];
+
+#ifdef HAVE_XINPUT
+    static XDevice *_xinput_mouse_device;
+    static XDevice *_xinput_keyboard_device;
+#endif // HAVE_XINPUT
 };

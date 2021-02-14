@@ -161,6 +161,11 @@ enum AtomName {
     XROOTPMAP_ID,
     XSETROOT_ID,
 
+#ifdef HAVE_XINPUT
+    MOUSE,
+    KEYBOARD,
+#endif // HAVE_XINPUT
+
     MAX_NR_ATOMS
 };
 
